@@ -1,140 +1,142 @@
 # Document Classifier
 
-Ein Python-Projekt zur Klassifikation englischsprachiger Texte mit einem selbst trainierten PyTorch-Modell. Eine FastAPI-Anwendung nimmt Texte entgegen, speichert sie zusammen mit der Vorhersage in MongoDB und ermöglicht das spätere Abrufen über eine Dokument-ID.
+A Python project for classifying English-language text with a trained PyTorch model. A FastAPI application accepts text, stores it alongside the prediction in MongoDB, and lets users retrieve the record by its document ID.
 
-Das Projekt verbindet Datenaufbereitung, Modelltraining und Evaluation mit der Entwicklung einer kleinen, getesteten Anwendung. Es wird schrittweise als Lern- und Portfolio-Projekt erweitert.
+The project connects data preparation, model training, and evaluation with a small, tested application. It is being developed incrementally as a learning and portfolio project.
 
-## Funktionsumfang
+## Features
 
-- TF-IDF und logistische Regression als Vergleichsmodell.
-- PyTorch-Klassifikator mit trainierbaren Wort-Embeddings, maskierter Mittelwertbildung und einer linearen Ausgabeschicht.
-- Training mit Mini-Batches und Speicherung des Checkpoints mit dem niedrigsten Validierungsverlust.
-- Vorhersagen über die Kommandozeile oder eine REST-API.
-- Speicherung von Text und Vorhersage in MongoDB; Abruf über die ID.
-- Eingabevalidierung und Fehlerantworten für ungültige oder unbekannte IDs.
-- API-Integrationstests mit pytest und FastAPIs `TestClient`.
+- TF-IDF and logistic regression as a baseline.
+- A PyTorch classifier with trainable word embeddings, masked mean pooling, and a linear output layer.
+- Mini-batch training and checkpoint selection based on the lowest validation loss.
+- Predictions through a command-line interface or REST API.
+- Persistent storage of submitted text and predictions in MongoDB, with retrieval by ID.
+- Input validation and error responses for malformed or unknown IDs.
+- API integration tests using pytest and FastAPI's `TestClient`.
 
-## Architektur
+## Architecture
 
 ```text
-Training                                  Anwendung
-────────                                  ─────────
-20 Newsgroups                             HTTP-Client / Swagger UI
-      │                                            │
-Datenaufbereitung                                 FastAPI
-      │                                      ┌─────┴─────┐
-Trainings-/Validierungssplit             PyTorch-Modell  MongoDB
-      │                                  aus Checkpoint  │
-PyTorch-Training                                    Docker-Volume
-      │
+Training                                  Application
+--------                                  -----------
+20 Newsgroups                             HTTP client / Swagger UI
+      |                                            |
+Data preparation                                FastAPI
+      |                                      +-----+-----+
+Training/validation split              PyTorch model    MongoDB
+      |                                from checkpoint     |
+PyTorch training                                     Docker volume
+      |
 artifacts/text_classifier.pt
 ```
 
-Training und Anwendung sind getrennte Prozesse. Die API lädt das gespeicherte Modell einmal beim Start. Ein POST auf `/predict` führt die Vorhersage aus und speichert den Datensatz. Ein GET auf `/predictions/{prediction_id}` liest die gespeicherten Daten aus MongoDB.
+Training and inference run as separate processes. The API loads the saved model once at startup. A POST request to `/predict` runs inference and stores the record. A GET request to `/predictions/{prediction_id}` retrieves the saved data from MongoDB.
 
-Aktuell läuft die API als lokaler Python-Prozess. Docker Compose startet die Datenbank.
+Currently, the API runs as a local Python process. Docker Compose runs the database.
 
-## Daten und Modelle
+## Data and models
 
-Verwendet wird ein Ausschnitt des Datensatzes [20 Newsgroups](https://scikit-learn.org/stable/datasets/real_world.html#the-20-newsgroups-text-dataset) mit drei Kategorien:
+The project uses a subset of [20 Newsgroups](https://scikit-learn.org/stable/datasets/real_world.html#the-20-newsgroups-text-dataset) with three categories:
 
 - `comp.graphics`
 - `rec.sport.baseball`
 - `sci.space`
 
-Die Daten bestehen aus englischsprachigen Newsgroup-Beiträgen. Header, Signaturen und zitierte Abschnitte werden mit den Optionen des Dataset-Loaders entfernt, um Abkürzungen über Metadaten zu reduzieren. Texte, die anschließend nur aus Leerraum bestehen, werden zusammen mit ihren Labels herausgefiltert.
+The dataset consists of English-language newsgroup posts. Headers, signatures, and quoted sections are removed using the dataset loader's options to reduce reliance on metadata shortcuts. Documents containing only whitespace after this processing are removed together with their labels.
 
-Aus dem bereitgestellten Trainingsdatensatz entsteht ein stratifizierter 80/20-Split mit `random_state=7`: **1.378 Trainingsdokumente und 345 Validierungsdokumente**. Sowohl der TF-IDF-Vektorisierer als auch das Vokabular des neuronalen Modells werden ausschließlich anhand der Trainingsdokumente aufgebaut. Der separate Testsatz von 20 Newsgroups wurde bisher nicht ausgewertet.
+The provided training partition is split into stratified training and validation sets with an 80/20 ratio and `random_state=7`: **1,378 training documents and 345 validation documents**. Both the TF-IDF vectorizer and the neural model's vocabulary are fitted using training documents only. The separate 20 Newsgroups test partition has not yet been evaluated.
+
+Dataset files are downloaded through scikit-learn and are not included in this repository.
 
 ### Baseline
 
-Die Baseline verwendet `TfidfVectorizer` und `LogisticRegression`. Das Trainingsskript gibt Accuracy, einen Classification Report und eine Confusion Matrix aus.
+The baseline uses `TfidfVectorizer` and `LogisticRegression`. Its training script reports accuracy, a classification report, and a confusion matrix.
 
-### Neuronales Modell
+### Neural model
 
 ```text
-Text → kleingeschriebene Tokens → Token-IDs → Embeddings
-     → maskierter Mittelwert über die Tokens → drei Klassen-Scores
+Text -> lowercase tokens -> token IDs -> embeddings
+     -> masked mean pooling over tokens -> three class scores
 ```
 
-Das Modell lernt Embeddings mit acht Dimensionen. Unbekannte Tokens werden auf `<unk>` abgebildet. Unterschiedlich lange Sequenzen werden innerhalb eines Batches mit `<pad>` aufgefüllt; eine Maske verhindert, dass diese Positionen den Mittelwert verändern. Eingaben ohne erkannte Tokens erhalten ein `<unk>`-Token.
+The model learns eight-dimensional embeddings. Unknown tokens map to `<unk>`. Variable-length sequences are padded with `<pad>` within each batch, and a mask excludes padded positions from the mean. Inputs that produce no tokens receive a single `<unk>` token.
 
-Trainiert wird für 80 Epochen mit Batch-Größe 32, Adam, einer Lernrate von `0.001` und Cross-Entropy-Loss. Python und PyTorch verwenden den Seed 7. Gewichte, Vokabular, Klassenreihenfolge, Modellkonfiguration und Validierungsmetriken werden gemeinsam gespeichert, damit die Vorverarbeitung beim späteren Vorhersagen zum Modell passt.
+Training runs for 80 epochs with a batch size of 32, Adam, a learning rate of `0.001`, and cross-entropy loss. Python and PyTorch use seed 7. The checkpoint stores the weights, vocabulary, class order, model configuration, and validation metrics together so inference uses the matching preprocessing.
 
-### Bisherige Ergebnisse
+### Results so far
 
-| Modell | Accuracy auf dem Validierungssatz |
+| Model | Validation accuracy |
 |---|---:|
-| TF-IDF + logistische Regression, bisheriger lokaler Lauf | 89,57 % |
-| PyTorch-Modell, aktuell gespeicherter Checkpoint | 89,57 % |
+| TF-IDF + logistic regression, previous local run | 89.57% |
+| PyTorch model, current local reference checkpoint | 89.57% |
 
-Der gespeicherte neuronale Checkpoint stammt aus der 80. Epoche und hat einen Validierungsverlust von etwa `0.375`. Ausgewählt wird anhand des niedrigsten Validierungsverlusts, nicht anhand der höchsten Accuracy.
+The saved neural checkpoint comes from the 80th epoch and has a validation loss of approximately `0.375`. Checkpoint selection uses the lowest validation loss rather than the highest accuracy.
 
-Beide Ergebnisse beziehen sich auf denselben Validierungssplit mit 345 Dokumenten. Sie sind keine unabhängigen Testergebnisse und zeigen bisher keinen Accuracy-Vorteil des neuronalen Modells. Die Mittelwertbildung berücksichtigt zudem keine Wortreihenfolge. Evaluation auf dem separaten Testsatz und eine ausführlichere Fehleranalyse sind geplant.
+Both results use the same validation split of 345 documents. They are not independent test results and do not currently show an accuracy advantage for the neural model. Mean pooling also ignores word order. Evaluation on the separate test partition and more detailed error analysis are planned.
 
-## Lokal starten
+## Run locally
 
-Die folgenden Befehle sind für Linux/Bash gedacht und werden im **Projektverzeichnis** ausgeführt. Die Referenzumgebung verwendet Python 3.12.4 und CPU-Inferenz. Für die Datenbank werden Docker und Docker Compose benötigt.
+The commands below target Linux/Bash and should be run from the **project root**. The reference environment uses Python 3.12.4 and CPU inference. Docker and Docker Compose are required for the database.
 
-### 1. Python-Umgebung einrichten
+### 1. Set up Python
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Die Abhängigkeiten für Anwendung und Training installieren:
+Install the application and training dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-`requirements.txt` hält die direkt verwendeten Pakete auf den Versionen der lokalen Referenzumgebung fest. Für PyTorch wird ausdrücklich die CPU-Variante über den zusätzlichen [PyTorch-Paketindex](https://pytorch.org/get-started/previous-versions/) ausgewählt. Eine GPU ist für dieses Projekt nicht erforderlich. Die Datei ist kein vollständiger Lockfile für alle indirekten Abhängigkeiten.
+`requirements.txt` pins directly used packages to the versions in the local reference environment. It explicitly selects the CPU build of PyTorch through the additional [PyTorch package index](https://pytorch.org/get-started/previous-versions/). A GPU is not required. This file is not a complete lockfile for transitive dependencies.
 
-### 2. Modell bereitstellen
+### 2. Prepare a model
 
-API und Kommandozeilen-Vorhersage erwarten `artifacts/text_classifier.pt`. Checkpoints werden lokal erzeugt und sind über `.gitignore` von der Versionierung ausgeschlossen. Nach einem frischen Checkout muss das Modell zunächst trainiert werden. Falls lokal bereits ein Checkpoint vorhanden ist, kann dieser Schritt übersprungen werden:
+The API and command-line predictor expect `artifacts/text_classifier.pt`. Checkpoints are generated locally and excluded from version control through `.gitignore`. After a fresh checkout, train the model first. Skip this step if a local checkpoint is already available:
 
 ```bash
 python -m document_classifier.train_nn
 ```
 
-Beim ersten Laden lädt scikit-learn den Datensatz herunter und speichert ihn im lokalen Cache. Dafür ist eine Internetverbindung erforderlich. Das Training erzeugt den Artefaktordner bei Bedarf und speichert dort den besten Checkpoint. Erneutes Training kann den vorhandenen Checkpoint überschreiben. Paketversionen und Ausführungsumgebung können trotz festgelegter Seeds zu abweichenden Ergebnissen führen.
+On the first dataset load, scikit-learn downloads the data and caches it locally, which requires an internet connection. Training creates the artifact directory if needed and saves the best checkpoint there. Running training again may overwrite an existing checkpoint. Package versions and the execution environment can affect results even with fixed seeds.
 
-Die Baseline separat ausführen:
+Run the baseline separately:
 
 ```bash
 python -m document_classifier.train_model
 ```
 
-Eine Vorhersage über die Kommandozeile benötigt nur das Modell, keine laufende Datenbank:
+Command-line inference requires the saved model but does not need a running database:
 
 ```bash
 python -m document_classifier.predict "The spacecraft landed on the Moon."
 ```
 
-### 3. MongoDB starten
+### 3. Start MongoDB
 
 ```bash
 docker compose up -d mongodb
 docker compose ps
 ```
 
-Die Compose-Datei verwendet `mongo:7.0` und veröffentlicht den Datenbankport lokal unter `127.0.0.1:27017`. Die Daten liegen im benannten Volume `mongo_data`, das im Container unter `/data/db` eingebunden ist. Das Volume bleibt beim Ersetzen des Containers erhalten.
+The Compose file uses `mongo:7.0` and publishes the database port locally at `127.0.0.1:27017`. Database files are stored in the named volume `mongo_data`, mounted at `/data/db` inside the container. The volume persists when the container is replaced.
 
-Die Anwendung verwendet die Datenbank `document_classifier` und die Collection `predictions`. Falls Docker auf dem eigenen Linux-System Administratorrechte benötigt, werden die Docker-Befehle mit `sudo` ausgeführt.
+The application uses the `document_classifier` database and the `predictions` collection. If Docker requires administrator privileges on your Linux installation, prefix Docker commands with `sudo`.
 
-### 4. API starten
+### 4. Start the API
 
 ```bash
 python -m uvicorn document_classifier.api:app --reload
 ```
 
-Die interaktive API-Dokumentation ist unter [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) erreichbar. Die API benötigt beim Start den Checkpoint und für das Speichern und Abrufen eine erreichbare MongoDB-Datenbank.
+Interactive API documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). The API needs the checkpoint at startup and a reachable MongoDB instance to save and retrieve records.
 
-## API-Beispiel
+## API example
 
-Einen Text klassifizieren und speichern:
+Classify and save a text:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/predict \
@@ -142,7 +144,7 @@ curl -X POST http://127.0.0.1:8000/predict \
   -d '{"text": "The spacecraft landed on the Moon."}'
 ```
 
-Beispielantwort; die ID wird bei jeder Speicherung neu erzeugt:
+Example response; a new ID is generated for each saved record:
 
 ```json
 {
@@ -151,7 +153,7 @@ Beispielantwort; die ID wird bei jeder Speicherung neu erzeugt:
 }
 ```
 
-Den gespeicherten Datensatz abrufen. Die Beispiel-ID durch die tatsächlich zurückgegebene ID ersetzen:
+Retrieve the saved record. Replace the example ID with the actual ID returned by POST:
 
 ```bash
 curl http://127.0.0.1:8000/predictions/507f1f77bcf86cd799439011
@@ -165,70 +167,70 @@ curl http://127.0.0.1:8000/predictions/507f1f77bcf86cd799439011
 }
 ```
 
-Die POST-Antwort verwendet derzeit `id`, die GET-Antwort `_id`. In beiden Fällen wird dieselbe MongoDB-ID als JSON-String ausgegeben.
+Currently, the POST response uses `id`, while the GET response uses `_id`. Both represent the same MongoDB ID as a JSON string.
 
-| Endpunkt / Fall | Antwort |
+| Endpoint / case | Response |
 |---|---|
 | `GET /health` | `200`, `{"status": "ok"}` |
-| `POST /predict` mit gültigem Text | `200`, ID und vorhergesagtes Label |
-| Fehlender, leerer oder nur aus Leerraum bestehender Text | `422` |
-| `GET /predictions/{prediction_id}` mit existierender ID | `200`, gespeicherter Datensatz |
-| ID mit ungültigem ObjectId-Format | `400`, `Invalid prediction ID` |
-| Gültiges ID-Format, aber kein passender Datensatz | `404`, `Prediction not found` |
+| `POST /predict` with valid text | `200`, document ID and predicted label |
+| Missing, empty, or whitespace-only text | `422` |
+| `GET /predictions/{prediction_id}` with an existing ID | `200`, saved record |
+| Malformed ObjectId | `400`, `Invalid prediction ID` |
+| Valid ID format with no matching record | `404`, `Prediction not found` |
 
-`/health` bestätigt aktuell die Erreichbarkeit der API und prüft keine Datenbankverbindung.
+`/health` currently confirms that the API responds; it does not check database connectivity.
 
 ## Tests
 
-Voraussetzungen sind eine laufende MongoDB und ein vorhandener Modell-Checkpoint. Zunächst die Test-Abhängigkeiten installieren; die Datei schließt die Anwendungs-Abhängigkeiten über `-r requirements.txt` mit ein:
+Tests require a running MongoDB instance and an existing model checkpoint. Install the test dependencies first; this file includes application dependencies through `-r requirements.txt`:
 
 ```bash
 python -m pip install -r requirements-dev.txt
 ```
 
-Zusätzlich zu pytest wird `httpx2` vom [Starlette-Testclient](https://starlette.dev/testclient/) benötigt. Ein separat gestarteter Uvicorn-Server ist für die Tests nicht erforderlich: `TestClient` startet die Anwendung innerhalb des Testprozesses.
+In addition to pytest, `httpx2` is required by the [Starlette test client](https://starlette.dev/testclient/). A separate Uvicorn process is not needed: `TestClient` runs the application within the test process.
 
 ```bash
 python -m pytest -q
 ```
 
-Die Suite umfasst sechs Testfälle:
+The suite covers six cases:
 
-- Drei Fälle für ungültige POST-Eingaben: fehlender Text, leerer Text und Leerraum.
-- Klassifikation, Speicherung und anschließendes Abrufen desselben Datensatzes über seine ID.
-- Ablehnung einer ungültig formatierten ID mit Status 400.
-- Antwort mit Status 404 für eine gültig formatierte, neu erzeugte ID ohne gespeichertes Dokument.
+- Three invalid POST inputs: missing text, empty text, and whitespace-only text.
+- Classification, storage, and retrieval of the same record by its ID.
+- Rejection of a malformed ID with status 400.
+- Status 404 for a newly generated, validly formatted ID with no stored document.
 
-Der Speicherungstest löscht seinen Datensatz in einem `finally`-Block. Die Tests verwenden derzeit dieselbe lokale Datenbankkonfiguration wie die Anwendung; eine separate Testdatenbank gehört zur Roadmap.
+The storage test deletes its record in a `finally` block. Tests currently use the same local database configuration as the application; a separate test database is on the roadmap.
 
-## Projektstruktur
+## Project structure
 
 ```text
 document_classifier/
-  data.py             Daten laden, bereinigen und aufteilen
-  inspect_data.py     Daten explorativ untersuchen
-  train_model.py      TF-IDF-Baseline trainieren und auswerten
-  train_nn.py         PyTorch-Modell, Batches, Training und Validierung
-  predict.py          Checkpoint laden und Vorhersagen ausführen
-  api.py              FastAPI-Endpunkte und Ressourcen-Lebenszyklus
-  inspect_db.py       MongoDB-Zugriff manuell untersuchen
+  data.py             Load, clean, and split the dataset
+  inspect_data.py     Explore the dataset
+  train_model.py      Train and evaluate the TF-IDF baseline
+  train_nn.py         PyTorch model, batching, training, and validation
+  predict.py          Load a checkpoint and run inference
+  api.py              FastAPI endpoints and resource lifecycle
+  inspect_db.py       Manually inspect MongoDB access
 tests/
-  test_api.py         API-Integrationstests
+  test_api.py         API integration tests
 artifacts/
-  text_classifier.pt  Checkpoint, durch Training erzeugbar
-compose.yaml          Lokale MongoDB mit persistentem Volume
-requirements.txt      Direkte Abhängigkeiten für Anwendung und Training
-requirements-dev.txt  Zusätzliche Pakete für die Tests
-.gitignore            Ausschluss lokaler und erzeugter Dateien
+  text_classifier.pt  Locally generated checkpoint; excluded from Git
+compose.yaml          Local MongoDB with a persistent volume
+requirements.txt      Direct application and training dependencies
+requirements-dev.txt  Additional test dependencies
+.gitignore            Excludes local and generated files
 ```
 
-## Nächste Schritte
+## Roadmap
 
-- Installation aus einer frischen Umgebung prüfen und indirekte Abhängigkeiten vollständig festhalten.
-- API-Antworten vereinheitlichen; Erstellungszeitpunkt und Modellversion speichern.
-- Menschliche Labelkorrekturen ergänzen und von der ursprünglichen Vorhersage unterscheiden.
-- Separate Testdatenbank, Datenbank-Timeouts und aussagekräftige Fehler bei nicht erreichbarer MongoDB ergänzen.
-- Den separaten Testsatz auswerten; Macro-F1 und Fehlermuster des neuronalen Modells untersuchen.
-- Die API containerisieren und gemeinsam mit MongoDB über Compose starten.
-- Tests und Image-Build automatisieren; anschließend lokal mit Kubernetes deployen.
-- Optional: Redis-Caching ergänzen und seinen Nutzen anhand von Trefferquote und Antwortzeit messen.
+- Verify installation in a fresh environment and lock transitive dependencies.
+- Standardize API responses and record creation timestamps and model versions.
+- Add human label corrections while preserving the original prediction.
+- Add a separate test database, database timeouts, and useful errors when MongoDB is unavailable.
+- Evaluate on the separate test partition, including macro F1 and neural model error patterns.
+- Containerize the API and run it together with MongoDB through Compose.
+- Automate tests and image builds, then deploy locally with Kubernetes.
+- Optionally add Redis caching and measure its benefit using hit rates and response times.
