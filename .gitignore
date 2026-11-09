@@ -1,0 +1,33 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+/.aws/
+/.codex/
+/.agents/
+
+# Private project handoff and application notes
+/NEW_PROJECT_CONTEXT.md
+
+# Generated model checkpoints and local datasets
+/artifacts/
+/data/
+
+# Editor and operating system temporary files
+*.swp
+*.swo
+*~
+.DS_Store

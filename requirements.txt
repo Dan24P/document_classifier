@@ -1,0 +1,9 @@
+# Direct application and training dependencies from the local reference environment.
+# CPU-only PyTorch build for the documented Linux setup.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0+cpu
+scikit-learn==1.9.1
+fastapi==0.162.2
+pydantic==2.14.3
+uvicorn==0.54.0
+pymongo==4.19.0
